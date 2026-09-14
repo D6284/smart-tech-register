@@ -50,8 +50,8 @@ const storageAdapter = {
   async set(key, value, useNamespace) {
     try {
       if (window.storage && typeof window.storage.set === 'function') {
-        await window.storage.set(key, value, useNamespace).catch(() => null);
-        return;
+        const result = await window.storage.set(key, value, useNamespace);
+        if (result !== null && result !== false) return;
       }
     } catch (e) { }
 
@@ -499,7 +499,7 @@ function renderAdmin() {
       <div class="admin-topbar">
         <button class="mobile-menu-btn" id="menuToggle">☰ Menu</button>
         <h2>${navItems.find(n => n[0] === tab)[1]}</h2>
-        <div></div>
+        <button class="btn btn-ghost btn-sm" id="refreshAdminBtn">Refresh applications</button>
       </div>
       ${content}
     </div>
@@ -880,6 +880,13 @@ function attachHandlers() {
   });
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) logoutBtn.onclick = () => { SESSION.isAdmin = false; APP_STATE.route = '#/admin/login'; render(); };
+  const refreshAdminBtn = document.getElementById('refreshAdminBtn');
+  if (refreshAdminBtn) refreshAdminBtn.onclick = async () => {
+    refreshAdminBtn.disabled = true;
+    await loadAll();
+    render();
+    showToast('Applications refreshed.');
+  };
   const menuToggle = document.getElementById('menuToggle');
   if (menuToggle) menuToggle.onclick = () => { APP_STATE.adminMenuOpen = !APP_STATE.adminMenuOpen; render(); };
 
@@ -1031,6 +1038,12 @@ function parseRouteFromHash() {
 }
 
 window.addEventListener('hashchange', () => { parseRouteFromHash(); render(); });
+window.addEventListener('storage', async (event) => {
+  if (event.key === 'applicants' && SESSION.isAdmin) {
+    await loadAll();
+    render();
+  }
+});
 
 (async function init() {
   document.getElementById('app').innerHTML = '<div style="padding:60px;text-align:center;color:#5A6B80;font-family:Inter,sans-serif;">Loading SMART TECH…</div>';
