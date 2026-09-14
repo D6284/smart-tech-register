@@ -7,6 +7,10 @@
 
 const APP_STATE = { route: '#/register', drawerId: null, showDupModal: false, pendingSubmit: null, adminMenuOpen: false };
 
+const SUPABASE_URL = document.querySelector('meta[name="supabase-url"]')?.content || '';
+const SUPABASE_ANON_KEY = document.querySelector('meta[name="supabase-anon-key"]')?.content || '';
+const SUPABASE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
 const DEFAULT_PROGRAM = {
   id: 'prog_web14',
   program_name: 'BUILD YOUR FIRST WEBSITE IN 14 DAYS',
@@ -33,6 +37,29 @@ let SESSION = { isAdmin: false };
 
 const storageAdapter = {
   async get(key, useNamespace) {
+    if (SUPABASE_ENABLED && key === 'applicants') {
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/applicants?select=data&order=created_at.desc`, {
+          headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+        });
+        if (!response.ok) throw new Error(`Supabase read failed (${response.status})`);
+        const rows = await response.json();
+        const remoteApplicants = rows.map(row => row.data);
+        let localApplicants = [];
+        try {
+          const localValue = localStorage.getItem(key);
+          localApplicants = localValue ? JSON.parse(localValue) : [];
+        } catch (e) { }
+        const merged = new Map(remoteApplicants.map(applicant => [applicant.id, applicant]));
+        localApplicants.forEach(applicant => {
+          if (!merged.has(applicant.id)) merged.set(applicant.id, applicant);
+        });
+        return { value: JSON.stringify([...merged.values()]) };
+      } catch (e) {
+        console.warn('Supabase applicants read failed; using local storage.', e);
+      }
+    }
+
     try {
       if (window.storage && typeof window.storage.get === 'function') {
         const result = await window.storage.get(key, useNamespace).catch(() => null);
@@ -48,6 +75,30 @@ const storageAdapter = {
     }
   },
   async set(key, value, useNamespace) {
+    if (SUPABASE_ENABLED && key === 'applicants') {
+      try {
+        const applicants = JSON.parse(value);
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/applicants?on_conflict=id`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates,return=minimal'
+          },
+          body: JSON.stringify(applicants.map(applicant => ({
+            id: applicant.id,
+            data: applicant,
+            created_at: new Date(applicant.created_at || Date.now()).toISOString()
+          })))
+        });
+        if (!response.ok) throw new Error(`Supabase write failed (${response.status})`);
+        return;
+      } catch (e) {
+        console.warn('Supabase applicants write failed; using local storage.', e);
+      }
+    }
+
     try {
       if (window.storage && typeof window.storage.set === 'function') {
         const result = await window.storage.set(key, value, useNamespace);
@@ -74,6 +125,7 @@ async function loadAll() {
   try {
     const appRes = await storageAdapter.get('applicants', true);
     DB.applicants = appRes && appRes.value ? JSON.parse(appRes.value) : [];
+    if (SUPABASE_ENABLED && DB.applicants.length) await saveApplicants();
   } catch (e) { DB.applicants = []; }
 
   try {
